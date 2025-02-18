@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 set -x
-export CUSTOM_SEARCH_NAMES="application,custom"
-export CUSTOM_SEARCH_LOCATIONS=${BASE_DIR}/init.d/,file:${BASE_DIR}/conf/
-export MEMBER_LIST=""
+export CUSTOM_SEARCH_NAMES="application"
+export CUSTOM_SEARCH_LOCATIONS=file:${BASE_DIR}/conf/
+export MEMBER_LIST="$MEMBER_LIST"
 PLUGINS_DIR="/home/nacos/plugins/peer-finder"
 function print_servers() {
-  if [[ ! -d "${PLUGINS_DIR}" ]]; then
+   if [[ ! -d "${PLUGINS_DIR}" ]]; then
     echo "" >"$CLUSTER_CONF"
     for server in ${NACOS_SERVERS}; do
       echo "$server" >>"$CLUSTER_CONF"
@@ -27,18 +27,33 @@ function print_servers() {
     sleep 30
   fi
 }
+
+function join_if_exist() {
+    if [ -n "$2" ]; then
+        echo "$1$2"
+    else
+        echo ""
+    fi
+}
+
 #===========================================================================================
 # JVM Configuration
 #===========================================================================================
-if [[ "${MODE}" == "standalone" ]]; then
+Xms=$(join_if_exist "-Xms" ${JVM_XMS})
+Xmx=$(join_if_exist "-Xmx" ${JVM_XMX})
+Xmn=$(join_if_exist "-Xmn" ${JVM_XMN})
+XX_MS=$(join_if_exist "-XX:MetaspaceSize=" ${JVM_MS})
+XX_MMS=$(join_if_exist "-XX:MaxMetaspaceSize=" ${JVM_MMS})
 
-  JAVA_OPT="${JAVA_OPT} -Xms${JVM_XMS} -Xmx${JVM_XMX} -Xmn${JVM_XMN}"
+JAVA_OPT="${JAVA_OPT} -XX:+UseConcMarkSweepGC -XX:+UseCMSCompactAtFullCollection -XX:CMSInitiatingOccupancyFraction=70 -XX:+CMSParallelRemarkEnabled -XX:SoftRefLRUPolicyMSPerMB=0 -XX:+CMSClassUnloadingEnabled -XX:SurvivorRatio=8 "
+if [[ "${MODE}" == "standalone" ]]; then
+  JAVA_OPT="${JAVA_OPT} $Xms $Xmx $Xmn"
   JAVA_OPT="${JAVA_OPT} -Dnacos.standalone=true"
 else
   if [[ "${EMBEDDED_STORAGE}" == "embedded" ]]; then
     JAVA_OPT="${JAVA_OPT} -DembeddedStorage=true"
   fi
-  JAVA_OPT="${JAVA_OPT} -server -Xms${JVM_XMS} -Xmx${JVM_XMX} -Xmn${JVM_XMN} -XX:MetaspaceSize=${JVM_MS} -XX:MaxMetaspaceSize=${JVM_MMS}"
+  JAVA_OPT="${JAVA_OPT} -server $Xms $Xmx $Xmn $XX_MS $XX_MMS"
   if [[ "${NACOS_DEBUG}" == "y" ]]; then
     JAVA_OPT="${JAVA_OPT} -Xdebug -Xrunjdwp:transport=dt_socket,address=9555,server=y,suspend=n"
   fi
@@ -85,13 +100,13 @@ JAVA_OPT="${JAVA_OPT} -Dnacos.member.list=${MEMBER_LIST}"
 
 JAVA_MAJOR_VERSION=$($JAVA -version 2>&1 | sed -E -n 's/.* version "([0-9]*).*$/\1/p')
 if [[ "$JAVA_MAJOR_VERSION" -ge "9" ]]; then
-  JAVA_OPT="${JAVA_OPT} -cp .:${BASE_DIR}/plugins/cmdb/*.jar:${BASE_DIR}/plugins/mysql/*.jar"
   JAVA_OPT="${JAVA_OPT} -Xlog:gc*:file=${BASE_DIR}/logs/nacos_gc.log:time,tags:filecount=10,filesize=102400"
 else
-  JAVA_OPT="${JAVA_OPT} -Djava.ext.dirs=${JAVA_HOME}/jre/lib/ext:${JAVA_HOME}/lib/ext:${BASE_DIR}/plugins/health:${BASE_DIR}/plugins/cmdb:${BASE_DIR}/plugins/mysql"
+  JAVA_OPT_EXT_FIX="-Djava.ext.dirs=${JAVA_HOME}/jre/lib/ext:${JAVA_HOME}/lib/ext"
   JAVA_OPT="${JAVA_OPT} -Xloggc:${BASE_DIR}/logs/nacos_gc.log -verbose:gc -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCTimeStamps -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=10 -XX:GCLogFileSize=100M"
 fi
 
+JAVA_OPT="${JAVA_OPT} -Dloader.path=${BASE_DIR}/plugins,${BASE_DIR}/plugins/health,${BASE_DIR}/plugins/cmdb,${BASE_DIR}/plugins/selector"
 JAVA_OPT="${JAVA_OPT} -Dnacos.home=${BASE_DIR}"
 JAVA_OPT="${JAVA_OPT} -jar ${BASE_DIR}/target/nacos-server.jar"
 JAVA_OPT="${JAVA_OPT} ${JAVA_OPT_EXT}"
